@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <overlay
+        android:targetPackage="com.twitter.android"
+        android:isStatic="true"
+        android:priority="9999" />
+
+    <application
+        android:hasCode="false"
+        android:label="Birdify Overlay" />
+
+</manifest>

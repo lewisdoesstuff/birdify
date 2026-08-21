@@ -1,0 +1,10 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+
+# Local machine config
+local.properties
+
+# Built artifacts
+*.zip
