@@ -22,7 +22,7 @@ Restores the classic Twitter branding in the X app (Android).
 
 ## Install
 
-1. Download `birdify-ksu.zip` from the [Releases](https://github.com/lew/birdify/releases) page.
+1. Download `birdify-ksu.zip` from the [Releases](https://github.com/lewisdoesstuff/birdify/releases) page.
 2. Install it as a module in KernelSU (or Magisk).
 3. Reboot.
 4. Open LSPosed, enable **Birdify**, and set its scope to **X** (`com.twitter.android`).
