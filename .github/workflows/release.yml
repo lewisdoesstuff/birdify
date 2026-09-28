@@ -21,10 +21,13 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Install SDK packages
-        run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # The action's default is "tools platform-tools", and the legacy tools
+          # package has been withdrawn from the SDK repository, so asking for
+          # our own list keeps that install from failing.
+          packages: 'platforms;android-35 build-tools;35.0.0'
 
       - name: Build and package
         run: ./release.sh
