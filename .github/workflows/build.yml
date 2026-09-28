@@ -43,3 +43,32 @@ jobs:
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             overlay/build/outputs/apk/debug/overlay-debug.apk
+
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No hardcoded resource ids
+        run: |
+          if grep -rnE '0x7f[0-9a-f]{6}' app/src/main/java; then
+            echo "::error::X renumbers every resource id on each release."
+            echo "::error::Resolve resources by name instead."
+            exit 1
+          fi
+
+      - name: No obfuscated classes
+        run: |
+          # DarkTokens.kt and BirdTint.kt are the deliberate exceptions: X keeps
+          # every theme's colours on one palette class, and draws its logos
+          # through a composable that tints whatever vector it is given, so both
+          # have to name a symbol R8 renames. resync.sh checks both are still
+          # present, and each verifies its target at runtime.
+          found=$(grep -rnE 'com\.x\.(compose|android|icons)\.[a-z0-9]+\.[a-z][0-9a-z]*\b' \
+            app/src/main/java | grep -vE 'DarkTokens.kt|BirdTint.kt' || true)
+          if [ -n "$found" ]; then
+            echo "::error::R8 renames these on every X release."
+            echo "::error::Hook by resource name or a stable API instead."
+            echo "$found"
+            exit 1
+          fi

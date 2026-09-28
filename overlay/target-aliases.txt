@@ -1,0 +1,12 @@
+# X has used more than one name for the same thing across releases, so the
+# overlay declares every spelling and lets the one that exists take effect. A
+# name the running build lacks is inert rather than broken.
+#
+# Each line is a group of interchangeable names, separated by "|". At least one
+# member must exist in the target X build, so a rename to a genuinely new name
+# still fails the check.
+#
+# format:  type/name | type/name
+mipmap/ic_launcher | mipmap/ic_launcher_twitter
+mipmap/ic_launcher_round | mipmap/ic_launcher_twitter_round
+drawable/splash_screen_icon | drawable/splash_screen_icon_animated
