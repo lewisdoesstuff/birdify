@@ -9,6 +9,11 @@ fi
 
 ./gradlew assembleDebug :overlay:assembleDebug
 
+# The APKs are build output and not tracked, so a fresh checkout has no module
+# tree beyond module.prop. Create it rather than relying on git to keep empty
+# directories, which it does not.
+mkdir -p ksu-module/system/app/Birdify ksu-module/system/product/overlay
+
 cp app/build/outputs/apk/debug/app-debug.apk ksu-module/system/app/Birdify/birdify.apk
 cp overlay/build/outputs/apk/debug/overlay-debug.apk ksu-module/system/product/overlay/birdify-overlay.apk
 

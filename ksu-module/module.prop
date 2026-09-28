@@ -1,6 +1,6 @@
 id=birdify
 name=Birdify
-version=v1.1.2
-versionCode=4
+version=v1.1.3
+versionCode=5
 author=lew
 description=Restores classic Twitter branding in X: blue bird launcher/notification icon, "Twitter" name, blue splash, dim dark theme, and Tweet/Retweet wording.
