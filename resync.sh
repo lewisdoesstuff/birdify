@@ -206,7 +206,28 @@ SYMBOL_CHECKS=(
     "DimSurfaces.kt|dim bars|Lcom/x/xds/core/c; u J"
     "BirdTint.kt|bird tint|Lcom/x/compose/core/j; d \(Lcom/x/icons/b;Ljava/lang/String;Landroidx/compose/ui/Modifier;JZLandroidx/compose/runtime/Composer;II\)V"
     "BirdTint.kt|bird tint|Lcom/x/icons/b; a I"
+    "GrokButton.kt|grok button|Lcom/x/urt/items/post/a6; Y Z"
 )
+
+# A field whose meaning only its owner's toString records, as "label|field".
+# The first boolean toString reads after printing the label must be the field,
+# which pins it down even though R8 renames both the class and the field.
+LABEL_CHECKS=(
+    "GrokButton.kt|grok button|showAskGrokButton=|Lcom/x/urt/items/post/a6;.Y:Z"
+)
+
+# Prints the first boolean field read after the given label in any dex.
+field_after_label() {
+    local label=$1 dexdump dex
+    dexdump=$(dirname "$AAPT2")/dexdump
+    for dex in "$WORKDIR"/dex/classes*.dex; do
+        grep -aqF "$label" "$dex" || continue
+        "$dexdump" -d "$dex" 2>/dev/null | awk -v label="$label" '
+            index($0, "const-string") && index($0, label) { armed = 1; next }
+            armed && /iget-boolean/ { sub(/.*, /, ""); sub(/ .*/, ""); print; exit }
+        '
+    done | head -1
+}
 
 # Lists every field and method in the APK's dex as "Lclass; name type".
 index_members() {
@@ -235,6 +256,35 @@ for check in "${SYMBOL_CHECKS[@]}"; do
     else
         printf '  MISSING  %-14s %s\n' "$what" "$shown"
         printf '           <-- %s goes inert on this build\n' "$file"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+for check in "${LABEL_CHECKS[@]}"; do
+    IFS='|' read -r file what label field <<< "$check"
+    found=$(field_after_label "$label")
+    if [ "$found" = "$field" ]; then
+        printf '  ok       %-14s %s is %s\n' "$what" "$label" "$field"
+    else
+        printf '  MISSING  %-14s %s is %s, expected %s\n' "$what" "$label" "${found:-absent}" "$field"
+        printf '           <-- %s goes inert on this build\n' "$file"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+
+echo
+echo "Feature switches answered (GrokTab.kt)"
+# Not obfuscated, but X can retire a switch or move the store.
+if grep -qE '^Lcom/x/featureswitches/FeatureSwitchesRepositoryImpl; getBoolean \(Ljava/lang/String;Z\)Z$' "$WORKDIR/members.txt"; then
+    printf '  ok       FeatureSwitchesRepositoryImpl.getBoolean\n'
+else
+    printf '  MISSING  FeatureSwitchesRepositoryImpl.getBoolean <-- GrokTab.kt goes inert\n'
+    FAILURES=$((FAILURES + 1))
+fi
+for key in android_webview_grok_tab_enabled; do
+    if grep -aqF "$key" "$WORKDIR"/dex/classes*.dex; then
+        printf '  ok       %s\n' "$key"
+    else
+        printf '  MISSING  %s <-- X no longer reads it, so the tab has moved\n' "$key"
         FAILURES=$((FAILURES + 1))
     fi
 done
