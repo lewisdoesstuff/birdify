@@ -64,6 +64,8 @@ class AppHook {
         DimSurfaces.hook(lpparam.classLoader)
         BirdTint.hook(lpparam.classLoader)
         BirdRefresh.hook()
+        GrokTab.hook(lpparam.classLoader)
+        GrokButton.hook(lpparam.classLoader)
     }
 
     private fun log(message: String) = XposedBridge.log("$LOG: $message")
