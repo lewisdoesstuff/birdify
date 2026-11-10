@@ -130,7 +130,13 @@ elif [ "$FOUND" -lt 4 ]; then
     echo
     echo "  note: $FOUND of 4 X icons found. The rest stay as the X logo."
 fi
-report "string/app_name" optional
+for n in APP_NAME app_name; do
+    report "string/$n" optional
+done
+
+echo
+echo "Header refresh logo served as the bird (BirdRefresh.kt)"
+report "raw/x_refresh_logo" optional
 
 echo
 echo "Overlay targets (overlay/src/main/res)"
@@ -186,35 +192,49 @@ while IFS= read -r group; do
     fi
 done < <(grep -vE '^\s*(#|$)' "$ALIAS_FILE" 2>/dev/null)
 
-echo
-echo "Dark surface tokens (DarkTokens.kt)"
-# The palette class and its field names are the one place birdify names an
-# obfuscated symbol, because X keeps every theme's colours on one class and
-# swapping by value would also hit light mode's black text. Checked here so a
-# rename surfaces before the module goes quietly inert.
-DARK_PALETTE=com/x/compose/core/i3
-ICON_COMPOSABLE=com/x/compose/core/l1
-symbol_present() {
-    local needle=$1 member hits
-    while read -r member; do
-        [ -n "$member" ] || continue
-        # -c so grep drains the stream and unzip is not SIGPIPE'd; || true because
-        # a zero-match grep exits 1, which set -e would treat as fatal
-        hits=$(unzip -p "$APK" "$member" 2>/dev/null | grep -acF "$needle" || true)
-        [ "$hits" -gt 0 ] && return 0
-    done < <(unzip -Z1 "$APK" 2>/dev/null | grep -E '^classes[0-9]*\.dex$')
-    return 1
+# DimTheme.kt, DimSurfaces.kt and BirdTint.kt are the only places birdify names an
+# obfuscated symbol. R8 reuses short names, so a class called j or c exists in
+# every build; what has to survive is the member the module hooks, with the
+# shape it expects. Each check below is a member of the dex, written as
+# "Lclass; name type", and a rename surfaces here before the module goes inert.
+SYMBOL_CHECKS=(
+    "DimTheme.kt|dim theme|Lcom/x/android/theme/api/j; a \(.*\)Lcom/x/android/theme/api/k;"
+    "DimTheme.kt|dim theme|Lcom/x/android/theme/api/k; DIM Lcom/x/android/theme/api/k;"
+    "DimTheme.kt|dim theme|Lcom/x/android/theme/api/k; LIGHTS_OUT Lcom/x/android/theme/api/k;"
+    "DimSurfaces.kt|dim bars|Lcom/x/xds/core/c; c J"
+    "DimSurfaces.kt|dim bars|Lcom/x/xds/core/c; v J"
+    "DimSurfaces.kt|dim bars|Lcom/x/xds/core/c; u J"
+    "BirdTint.kt|bird tint|Lcom/x/compose/core/j; d \(Lcom/x/icons/b;Ljava/lang/String;Landroidx/compose/ui/Modifier;JZLandroidx/compose/runtime/Composer;II\)V"
+    "BirdTint.kt|bird tint|Lcom/x/icons/b; a I"
+)
+
+# Lists every field and method in the APK's dex as "Lclass; name type".
+index_members() {
+    local dexdump dex
+    dexdump=$(dirname "$AAPT2")/dexdump
+    [ -x "$dexdump" ] || die "dexdump not found next to $AAPT2"
+    mkdir -p "$WORKDIR/dex"
+    unzip -o -q "$APK" 'classes*.dex' -d "$WORKDIR/dex"
+    for dex in "$WORKDIR"/dex/classes*.dex; do
+        "$dexdump" "$dex" 2>/dev/null
+    done | awk '
+        /^ *#[0-9]+ *: \(in L/ { cls = $NF; sub(/^\(in /, "", cls); sub(/\)$/, "", cls); next }
+        /^ *name *: / { name = $3; gsub(/\047/, "", name); next }
+        /^ *type *: / && cls != "" { type = $3; gsub(/\047/, "", type); print cls, name, type; cls = "" }
+    ' > "$WORKDIR/members.txt"
 }
 
 echo
 echo "Obfuscated symbols the module hooks (isolated in their own files)"
-for pair in "$DARK_PALETTE:dark surface tokens" "$ICON_COMPOSABLE:bird tint"; do
-    needle=${pair%%:*}
-    what=${pair#*:}
-    if symbol_present "$needle"; then
-        printf '  ok       %-24s %s\n' "${needle//\//.}" "$what"
+index_members
+for check in "${SYMBOL_CHECKS[@]}"; do
+    IFS='|' read -r file what member <<< "$check"
+    shown=${member//\\/}
+    if grep -qE "^${member}\$" "$WORKDIR/members.txt"; then
+        printf '  ok       %-14s %s\n' "$what" "$shown"
     else
-        printf '  MISSING  %-24s %s <-- inert on this build\n' "${needle//\//.}" "$what"
+        printf '  MISSING  %-14s %s\n' "$what" "$shown"
+        printf '           <-- %s goes inert on this build\n' "$file"
         FAILURES=$((FAILURES + 1))
     fi
 done
