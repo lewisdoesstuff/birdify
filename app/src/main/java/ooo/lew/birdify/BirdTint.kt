@@ -20,8 +20,8 @@ import de.robv.android.xposed.XposedHelpers
 object BirdTint {
 
     private const val LOG = "birdify"
-    private const val ICON_COMPOSABLE = "com.x.compose.core.l1"
-    private const val ICON_COMPOSABLE_METHOD = "a"
+    private const val ICON_COMPOSABLE = "com.x.compose.core.j"
+    private const val ICON_COMPOSABLE_METHOD = "d"
     private const val ICON_ARG = 0
     private const val RES_FIELD = "a"
     private const val TINT_ARG = 3

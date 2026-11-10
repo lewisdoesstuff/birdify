@@ -24,6 +24,9 @@ class AppHook {
     companion object {
         const val appPkg = "com.twitter.android"
         private const val LOG = "birdify"
+
+        /** X renamed app_name to APP_NAME in 12.41.0, so try each spelling. */
+        val appNames = listOf("APP_NAME", "app_name")
     }
 
     private val remap = mutableMapOf<Int, Int>()
@@ -57,8 +60,10 @@ class AppHook {
             log("hooks failed: $t")
         }
 
-        DarkTokens.hook(lpparam.classLoader)
+        DimTheme.hook(lpparam.classLoader)
+        DimSurfaces.hook(lpparam.classLoader)
         BirdTint.hook(lpparam.classLoader)
+        BirdRefresh.hook()
     }
 
     private fun log(message: String) = XposedBridge.log("$LOG: $message")
@@ -76,7 +81,9 @@ class AppHook {
             XIcons.ids(resources)
             val res = resources ?: XIcons.resources() ?: return
             try {
-                idAppName = res.getIdentifier("app_name", "string", appPkg)
+                idAppName = appNames
+                    .map { res.getIdentifier(it, "string", appPkg) }
+                    .firstOrNull { it != 0 } ?: 0
                 for (id in XIcons.ids(res)) {
                     remap[id] = R.drawable.bird_blue
                 }

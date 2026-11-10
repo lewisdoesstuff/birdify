@@ -10,3 +10,4 @@
 mipmap/ic_launcher | mipmap/ic_launcher_twitter
 mipmap/ic_launcher_round | mipmap/ic_launcher_twitter_round
 drawable/splash_screen_icon | drawable/splash_screen_icon_animated
+string/app_name | string/APP_NAME

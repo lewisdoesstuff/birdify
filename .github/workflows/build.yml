@@ -59,13 +59,14 @@ jobs:
 
       - name: No obfuscated classes
         run: |
-          # DarkTokens.kt and BirdTint.kt are the deliberate exceptions: X keeps
-          # every theme's colours on one palette class, and draws its logos
-          # through a composable that tints whatever vector it is given, so both
-          # have to name a symbol R8 renames. resync.sh checks both are still
+          # DimTheme.kt, DimSurfaces.kt and BirdTint.kt are the deliberate
+          # exceptions: X maps every dark setting to lights out in one function,
+          # keeps its bars' dark greys on one colour class, and draws its logos
+          # through a composable that tints whatever vector it is given, so each
+          # has to name a symbol R8 renames. resync.sh checks both are still
           # present, and each verifies its target at runtime.
-          found=$(grep -rnE 'com\.x\.(compose|android|icons)\.[a-z0-9]+\.[a-z][0-9a-z]*\b' \
-            app/src/main/java | grep -vE 'DarkTokens.kt|BirdTint.kt' || true)
+          found=$(grep -rnE 'com\.x\.(compose|android|icons|xds)\.[a-z0-9]+\.[a-z][0-9a-z]*\b' \
+            app/src/main/java | grep -vE 'DimTheme.kt|DimSurfaces.kt|BirdTint.kt' || true)
           if [ -n "$found" ]; then
             echo "::error::R8 renames these on every X release."
             echo "::error::Hook by resource name or a stable API instead."
