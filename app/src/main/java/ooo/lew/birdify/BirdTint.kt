@@ -3,7 +3,7 @@ package ooo.lew.birdify
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodHook.MethodHookParam
 import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
+import java.lang.reflect.Field
 
 /**
  * Paints the substituted bird Twitter blue.
@@ -13,17 +13,14 @@ import de.robv.android.xposed.XposedHelpers
  * white in dark mode. Passing a different colour to that composable is the only
  * way past it.
  *
- * The composable is named here because R8 renames it, so both the class and the
- * method are checked when the hook installs. A rename leaves the bird tinted by
- * the theme and says so in the log, rather than changing the app's icons.
+ * Targets finds the composable and the icon wrapper's resource field, since R8
+ * renames both. If either is missing the bird stays tinted by the theme and
+ * the log says so, rather than this changing the app's icons.
  */
 object BirdTint {
 
     private const val LOG = "birdify"
-    private const val ICON_COMPOSABLE = "com.x.compose.core.j"
-    private const val ICON_COMPOSABLE_METHOD = "d"
     private const val ICON_ARG = 0
-    private const val RES_FIELD = "a"
     private const val TINT_ARG = 3
     private const val DEFAULT_MASK_ARG = 7
     private const val ARGS = 8
@@ -40,20 +37,22 @@ object BirdTint {
     private val TWITTER_BLUE = 0xFF1D9BF0L shl 32
 
     @Volatile
-    private var installed = false
+    private var resField: Field? = null
 
     @Volatile
     private var tinted = 0
 
-    fun hook(cl: ClassLoader) {
+    fun hook() {
         try {
-            val composable = XposedHelpers.findClass(ICON_COMPOSABLE, cl)
-            val targets = XposedBridge.hookAllMethods(composable, ICON_COMPOSABLE_METHOD, tintHook)
-            installed = targets.isNotEmpty()
-            XposedBridge.log(
-                if (installed) "$LOG: bird tint hook installed on $ICON_COMPOSABLE"
-                else "$LOG: bird tint found no $ICON_COMPOSABLE_METHOD on $ICON_COMPOSABLE"
-            )
+            val composable = Targets.method(Targets.ICON_COMPOSABLE)
+            val res = Targets.field(Targets.ICON_RES)
+            if (composable == null || res == null || res.type != Int::class.javaPrimitiveType) {
+                XposedBridge.log("$LOG: bird tint has no icon composable, bird unchanged")
+                return
+            }
+            resField = res
+            XposedBridge.hookMethod(composable, tintHook)
+            XposedBridge.log("$LOG: bird tint hook installed on ${composable.declaringClass.name}.${composable.name}")
         } catch (t: Throwable) {
             XposedBridge.log("$LOG: bird tint unavailable: $t")
         }
@@ -61,18 +60,17 @@ object BirdTint {
 
     private val tintHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            if (!installed || param.args.size < ARGS) return
+            val res = resField ?: return
+            if (param.args.size < ARGS) return
             val icons = XIcons.ids()
             if (icons.isEmpty()) return
             val resId = try {
-                XposedHelpers.getIntField(param.args[ICON_ARG], RES_FIELD)
+                res.getInt(param.args[ICON_ARG])
             } catch (t: Throwable) {
                 return
             }
             if (resId !in icons) return
-            if (tinted == 0) {
-                XposedBridge.log("$LOG: tinting $ICON_COMPOSABLE.$ICON_COMPOSABLE_METHOD for $resId")
-            }
+            if (tinted == 0) XposedBridge.log("$LOG: tinting the bird, resource $resId")
             param.args[DEFAULT_MASK_ARG] =
                 (param.args[DEFAULT_MASK_ARG] as Int) and TINT_DEFAULT_BIT.inv()
             param.args[TINT_ARG] = TWITTER_BLUE

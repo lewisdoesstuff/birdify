@@ -3,7 +3,6 @@ package ooo.lew.birdify
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodHook.MethodHookParam
 import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
 import java.lang.reflect.Field
 import java.lang.reflect.Modifier
 import java.util.concurrent.ConcurrentHashMap
@@ -17,19 +16,13 @@ import java.util.concurrent.ConcurrentHashMap
  * carries promoted metadata, so returning null for any item that has some
  * removes the ad without leaving a gap.
  *
- * The function and the metadata class are named here because R8 renames them.
- * The metadata's toString names it, so the first one seen is checked before
- * anything is dropped. Each new kind of item is logged once, which is how a
- * card worth removing can be identified from the device.
+ * Targets finds the function and the metadata class, since R8 renames them.
+ * Each new kind of item is logged once, which is how a card worth removing can
+ * be identified from the device.
  */
 object TimelineAds {
 
     private const val LOG = "birdify"
-    private const val ITEM_BUILDER = "org.chromium.support_lib_boundary.util.b"
-    private const val ITEM_BUILDER_METHOD = "W"
-    private const val ITEM = "com.x.models.timelines.items.o0"
-    private const val PROMOTED = "com.x.models.gf"
-    private const val PROMOTED_NAME = "TimelinePromotedMetadata("
 
     private var promoted: Class<*>? = null
 
@@ -37,23 +30,18 @@ object TimelineAds {
     private val promotedFields = ConcurrentHashMap<Class<*>, List<Field>>()
 
     @Volatile
-    private var confirmed: Boolean? = null
-
-    @Volatile
     private var dropped = 0
 
-    fun hook(cl: ClassLoader) {
+    fun hook() {
         try {
-            val item = XposedHelpers.findClass(ITEM, cl)
-            promoted = XposedHelpers.findClass(PROMOTED, cl)
-            val builder = XposedHelpers.findClass(ITEM_BUILDER, cl)
-            val targets = builder.declaredMethods
-                .filter { it.name == ITEM_BUILDER_METHOD && it.returnType == item }
-                .map { XposedBridge.hookMethod(it, itemHook) }
-            XposedBridge.log(
-                if (targets.isNotEmpty()) "$LOG: timeline ads hook installed on $ITEM_BUILDER"
-                else "$LOG: timeline ads found no $ITEM_BUILDER_METHOD returning $ITEM"
-            )
+            val builder = Targets.method(Targets.ITEM_BUILDER)
+            promoted = Targets.type(Targets.PROMOTED)
+            if (builder == null || promoted == null) {
+                XposedBridge.log("$LOG: timeline ads has no item builder, ads unchanged")
+                return
+            }
+            XposedBridge.hookMethod(builder, itemHook)
+            XposedBridge.log("$LOG: timeline ads hook installed on ${builder.declaringClass.name}.${builder.name}")
         } catch (t: Throwable) {
             XposedBridge.log("$LOG: timeline ads unavailable: $t")
         }
@@ -79,30 +67,12 @@ object TimelineAds {
         return "${item.javaClass.name} ($name)"
     }
 
-    /** Checks once that the metadata class is still the promoted metadata. */
-    private fun confirm(metadata: Any): Boolean {
-        confirmed?.let { return it }
-        val name = try {
-            metadata.toString()
-        } catch (t: Throwable) {
-            ""
-        }
-        val ok = name.startsWith(PROMOTED_NAME)
-        if (!ok) XposedBridge.log("$LOG: $PROMOTED is not $PROMOTED_NAME, ads unchanged")
-        confirmed = ok
-        return ok
-    }
-
     private val itemHook = object : XC_MethodHook() {
         override fun afterHookedMethod(param: MethodHookParam) {
             val item = param.result ?: return
-            for (field in fieldsOf(item)) {
-                val metadata = field.get(item) ?: continue
-                if (!confirm(metadata)) return
-                param.result = null
-                if (dropped++ == 0) XposedBridge.log("$LOG: dropping promoted timeline items")
-                return
-            }
+            if (fieldsOf(item).none { it.get(item) != null }) return
+            param.result = null
+            if (dropped++ == 0) XposedBridge.log("$LOG: dropping promoted timeline items")
         }
     }
 }

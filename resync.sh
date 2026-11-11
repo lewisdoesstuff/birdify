@@ -192,119 +192,141 @@ while IFS= read -r group; do
     fi
 done < <(grep -vE '^\s*(#|$)' "$ALIAS_FILE" 2>/dev/null)
 
-# DimTheme.kt, DimSurfaces.kt and BirdTint.kt are the only places birdify names an
-# obfuscated symbol. R8 reuses short names, so a class called j or c exists in
-# every build; what has to survive is the member the module hooks, with the
-# shape it expects. Each check below is a member of the dex, written as
-# "Lclass; name type", and a rename surfaces here before the module goes inert.
-SYMBOL_CHECKS=(
-    "DimTheme.kt|dim theme|Lcom/x/android/theme/api/j; a \(.*\)Lcom/x/android/theme/api/k;"
-    "DimTheme.kt|dim theme|Lcom/x/android/theme/api/k; DIM Lcom/x/android/theme/api/k;"
-    "DimTheme.kt|dim theme|Lcom/x/android/theme/api/k; LIGHTS_OUT Lcom/x/android/theme/api/k;"
-    "DimSurfaces.kt|dim bars|Lcom/x/xds/core/c; c J"
-    "DimSurfaces.kt|dim bars|Lcom/x/xds/core/c; v J"
-    "DimSurfaces.kt|dim bars|Lcom/x/xds/core/c; u J"
-    "BirdTint.kt|bird tint|Lcom/x/compose/core/j; d \(Lcom/x/icons/b;Ljava/lang/String;Landroidx/compose/ui/Modifier;JZLandroidx/compose/runtime/Composer;II\)V"
-    "BirdTint.kt|bird tint|Lcom/x/icons/b; a I"
-    "GrokButton.kt|grok button|Lcom/x/urt/items/post/a6; Y Z"
-    "TimelineAds.kt|timeline ads|Lorg/chromium/support_lib_boundary/util/b; W \(.*\)Lcom/x/models/timelines/items/o0;"
-)
+# Targets.kt finds every obfuscated member the hooks need on the device, by
+# anchors R8 leaves alone: toString labels, enum constant names and signatures
+# made of unobfuscated types. DexKit has no desktop build, so the same searches
+# are repeated here with dexdump. Each must match exactly once, as it must on
+# the device, and what it finds is printed so a change is easy to follow.
 
-# A class known only by the name its own toString prints, as "label|class".
-OWNER_CHECKS=(
-    "TimelineAds.kt|timeline ads|TimelinePromotedMetadata(|Lcom/x/models/gf;"
-)
+# Lists every field and method in the APK's dex as "Lclass; name type dex".
+index_members() {
+    local dex
+    DEXDUMP=$(dirname "$AAPT2")/dexdump
+    [ -x "$DEXDUMP" ] || die "dexdump not found next to $AAPT2"
+    mkdir -p "$WORKDIR/dex"
+    unzip -o -q "$APK" 'classes*.dex' -d "$WORKDIR/dex"
+    for dex in "$WORKDIR"/dex/classes*.dex; do
+        "$DEXDUMP" "$dex" 2>/dev/null | awk -v dex="$dex" '
+            /^ *#[0-9]+ *: \(in L/ { cls = $NF; sub(/^\(in /, "", cls); sub(/\)$/, "", cls); next }
+            /^ *name *: / { name = $3; gsub(/\047/, "", name); next }
+            /^ *type *: / && cls != "" { type = $3; gsub(/\047/, "", type); print cls, name, type, dex; cls = "" }
+        '
+    done > "$WORKDIR/members.txt"
+}
 
-# Prints the class whose code holds the given string constant.
+# Escapes a dex type for use in an extended regex.
+regex() {
+    printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g'
+}
+
+# Prints the members whose "Lclass; name type" matches the given regex.
+members_matching() {
+    awk '{ print $1, $2, $3 }' "$WORKDIR/members.txt" | grep -E "^$1\$"
+}
+
+# Prints the bytecode of one method, given as class, name and type.
+method_code() {
+    local cls=$1 name=$2 type=$3 dex
+    dex=$(awk -v c="$cls" -v n="$name" -v t="$type" '$1 == c && $2 == n && $3 == t { print $4; exit }' "$WORKDIR/members.txt")
+    [ -n "$dex" ] || return 0
+    "$DEXDUMP" -d "$dex" 2>/dev/null | awk -v c="$cls" -v n="$name" -v t="$type" '
+        /^ *#[0-9]+ *: \(in L/ { cur = $NF; sub(/^\(in /, "", cur); sub(/\)$/, "", cur); inside = 0; next }
+        /^ *name *: / { nm = $3; gsub(/\047/, "", nm); next }
+        /^ *type *: / { ty = $3; gsub(/\047/, "", ty); inside = (cur == c && nm == n && ty == t); next }
+        inside && /\|[0-9a-f]+: / { print }
+    '
+}
+
+# Prints the class whose code holds a string constant starting with the label.
 label_owner() {
-    local label=$1 dexdump dex
-    dexdump=$(dirname "$AAPT2")/dexdump
+    local label=$1 dex
     for dex in "$WORKDIR"/dex/classes*.dex; do
         grep -aqF "$label" "$dex" || continue
-        "$dexdump" -d "$dex" 2>/dev/null | awk -v label="$label" '
+        "$DEXDUMP" -d "$dex" 2>/dev/null | awk -v label="$label" '
             /^ *#[0-9]+ *: \(in L/ { cls = $NF; sub(/^\(in /, "", cls); sub(/\)$/, "", cls) }
             index($0, "const-string") && index($0, "\"" label) { print cls; exit }
         '
     done | head -1
 }
 
-# A field whose meaning only its owner's toString records, as "label|field".
-# The first boolean toString reads after printing the label must be the field,
-# which pins it down even though R8 renames both the class and the field.
-LABEL_CHECKS=(
-    "GrokButton.kt|grok button|showAskGrokButton=|Lcom/x/urt/items/post/a6;.Y:Z"
-)
-
-# Prints the first boolean field read after the given label in any dex.
-field_after_label() {
-    local label=$1 dexdump dex
-    dexdump=$(dirname "$AAPT2")/dexdump
-    for dex in "$WORKDIR"/dex/classes*.dex; do
-        grep -aqF "$label" "$dex" || continue
-        "$dexdump" -d "$dex" 2>/dev/null | awk -v label="$label" '
-            index($0, "const-string") && index($0, label) { armed = 1; next }
-            armed && /iget-boolean/ { sub(/.*, /, ""); sub(/ .*/, ""); print; exit }
-        '
-    done | head -1
+# Prints the field a data class's toString reads for one label. Kotlin reads
+# each property once, in the order it prints them, so the n-th label belongs
+# to the n-th field read, as Targets.labelledField assumes.
+labelled_field() {
+    local prefix=$1 name=$2 owner
+    owner=$(label_owner "$prefix")
+    [ -n "$owner" ] || return 0
+    method_code "$owner" toString '()Ljava/lang/String;' | awk -v own="$owner." -v name="$name" '
+        /const-string/ {
+            s = $0; sub(/^[^"]*"/, "", s); sub(/" \/\/ string@[0-9a-f]+$/, "", s)
+            if (s !~ /=$/) next
+            sub(/=$/, "", s); n = split(s, parts, ", "); s = parts[n]; sub(/^.*\(/, "", s)
+            labels[++nl] = s; next
+        }
+        /iget/ && index($0, own) { f = $0; sub(/.*, /, "", f); sub(/ .*/, "", f); reads[++nr] = f }
+        END { if (nl != nr) exit; for (i = 1; i <= nl; i++) if (labels[i] == name) print reads[i] }
+    '
 }
 
-# Lists every field and method in the APK's dex as "Lclass; name type".
-index_members() {
-    local dexdump dex
-    dexdump=$(dirname "$AAPT2")/dexdump
-    [ -x "$dexdump" ] || die "dexdump not found next to $AAPT2"
-    mkdir -p "$WORKDIR/dex"
-    unzip -o -q "$APK" 'classes*.dex' -d "$WORKDIR/dex"
-    for dex in "$WORKDIR"/dex/classes*.dex; do
-        "$dexdump" "$dex" 2>/dev/null
-    done | awk '
-        /^ *#[0-9]+ *: \(in L/ { cls = $NF; sub(/^\(in /, "", cls); sub(/\)$/, "", cls); next }
-        /^ *name *: / { name = $3; gsub(/\047/, "", name); next }
-        /^ *type *: / && cls != "" { type = $3; gsub(/\047/, "", type); print cls, name, type; cls = "" }
-    ' > "$WORKDIR/members.txt"
+# Keeps the "Lclass; name type" lines on stdin whose code contains the text.
+code_contains() {
+    local text=$1 cls name type
+    while read -r cls name type; do
+        method_code "$cls" "$name" "$type" | grep -qF "$text" && echo "$cls $name $type"
+    done
+}
+
+# Reports one search: its result, which must be a single line.
+target() {
+    local what=$1 desc=$2 found=$3 count
+    count=$(printf '%s' "$found" | grep -c . || true)
+    if [ "$count" -eq 1 ]; then
+        printf '  ok       %-14s %s is %s\n' "$what" "$desc" "$found"
+    else
+        printf '  MISSING  %-14s %s matched %s times\n' "$what" "$desc" "$count"
+        printf '           <-- update the search in Targets.kt\n'
+        FAILURES=$((FAILURES + 1))
+    fi
 }
 
 echo
-echo "Obfuscated symbols the module hooks (isolated in their own files)"
+echo "Hook targets found on the device (Targets.kt)"
 index_members
-for check in "${SYMBOL_CHECKS[@]}"; do
-    IFS='|' read -r file what member <<< "$check"
-    shown=${member//\\/}
-    if grep -qE "^${member}\$" "$WORKDIR/members.txt"; then
-        printf '  ok       %-14s %s\n' "$what" "$shown"
-    else
-        printf '  MISSING  %-14s %s\n' "$what" "$shown"
-        printf '           <-- %s goes inert on this build\n' "$file"
-        FAILURES=$((FAILURES + 1))
-    fi
-done
-for check in "${OWNER_CHECKS[@]}"; do
-    IFS='|' read -r file what label owner <<< "$check"
-    found=$(label_owner "$label")
-    if [ "$found" = "$owner" ]; then
-        printf '  ok       %-14s %s is %s\n' "$what" "$label" "$owner"
-    else
-        printf '  MISSING  %-14s %s is %s, expected %s\n' "$what" "$label" "${found:-absent}" "$owner"
-        printf '           <-- %s goes inert on this build\n' "$file"
-        FAILURES=$((FAILURES + 1))
-    fi
-done
-for check in "${LABEL_CHECKS[@]}"; do
-    IFS='|' read -r file what label field <<< "$check"
-    found=$(field_after_label "$label")
-    if [ "$found" = "$field" ]; then
-        printf '  ok       %-14s %s is %s\n' "$what" "$label" "$field"
-    else
-        printf '  MISSING  %-14s %s is %s, expected %s\n' "$what" "$label" "${found:-absent}" "$field"
-        printf '           <-- %s goes inert on this build\n' "$file"
-        FAILURES=$((FAILURES + 1))
-    fi
-done
+
+theme=$(awk '($2 == "STANDARD" || $2 == "DIM" || $2 == "LIGHTS_OUT") && $1 == $3 { n[$1]++ }
+    END { for (c in n) if (n[c] == 3) print c }' "$WORKDIR/members.txt")
+target "dim theme" "theme enum" "$theme"
+if [ -n "$theme" ]; then
+    mapper=$(members_matching "[^ ]+ [^ ]+ \(L[^;]+;L[^;]+;Z\)$(regex "$theme")" |
+        code_contains "${theme}.LIGHTS_OUT:")
+    target "dim theme" "theme mapper" "$mapper"
+fi
+
+palette=$(label_owner "XColors(")
+target "dim bars" "XColors" "$palette"
+
+icon=$(label_owner "Icon(drawableRes=")
+target "bird tint" "icon wrapper" "$icon"
+if [ -n "$icon" ]; then
+    target "bird tint" "icon composable" "$(members_matching "[^ ]+ [^ ]+ \($(regex "$icon")Ljava/lang/String;Landroidx/compose/ui/Modifier;JZLandroidx/compose/runtime/Composer;II\)V")"
+    target "bird tint" "drawableRes" "$(labelled_field "Icon(drawableRes=" drawableRes | grep ':I$')"
+fi
+
+target "grok button" "showAskGrokButton" "$(labelled_field "AvailablePost(" showAskGrokButton | grep ':Z$')"
+
+target "timeline ads" "TimelinePromotedMetadata" "$(label_owner "TimelinePromotedMetadata(")"
+post=$(label_owner "UrtTimelinePost(")
+target "timeline ads" "UrtTimelinePost" "$post"
+if [ -n "$post" ]; then
+    builder=$(members_matching '[^ ]+ [^ ]+ \(L[^;]+;Ljava/util/LinkedHashMap;Ljava/util/LinkedHashMap;L[^;]+;\).*' |
+        code_contains "${post}.<init>")
+    target "timeline ads" "item builder" "$builder"
+fi
 
 echo
 echo "Feature switches answered (GrokTab.kt)"
 # Not obfuscated, but X can retire a switch or move the store.
-if grep -qE '^Lcom/x/featureswitches/FeatureSwitchesRepositoryImpl; getBoolean \(Ljava/lang/String;Z\)Z$' "$WORKDIR/members.txt"; then
+if members_matching 'Lcom/x/featureswitches/FeatureSwitchesRepositoryImpl; getBoolean \(Ljava/lang/String;Z\)Z' >/dev/null; then
     printf '  ok       FeatureSwitchesRepositoryImpl.getBoolean\n'
 else
     printf '  MISSING  FeatureSwitchesRepositoryImpl.getBoolean <-- GrokTab.kt goes inert\n'

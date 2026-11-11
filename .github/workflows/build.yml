@@ -59,19 +59,14 @@ jobs:
 
       - name: No obfuscated classes
         run: |
-          # DimTheme.kt, DimSurfaces.kt, BirdTint.kt, GrokButton.kt and
-          # TimelineAds.kt are the deliberate exceptions: X maps every dark
-          # setting to lights out in one function, keeps its bars' dark greys on
-          # one colour class, draws its logos through a composable that tints
-          # whatever vector it is given, keeps each post's Grok button on its UI
-          # model, and builds every timeline item through one function, so each
-          # has to name a symbol R8 renames. resync.sh checks every member they name,
-          # and each verifies its target at runtime.
-          found=$(grep -rnE 'com\.x\.(compose|android|icons|xds|urt|models)\.[a-z0-9]+\.[a-z][0-9a-z]*\b' \
-            app/src/main/java | grep -vE 'DimTheme.kt|DimSurfaces.kt|BirdTint.kt|GrokButton.kt|TimelineAds.kt' || true)
+          # Targets.kt finds every obfuscated member at runtime, so no source
+          # names one. R8 gives renamed classes one- or two-letter names, so a
+          # string or dex descriptor ending in such a segment is one of them.
+          found=$(grep -rnE '"[a-z][a-z0-9_]*(\.[a-z0-9_]+)*\.[a-z][0-9a-z]?"|L[a-z0-9_]+(/[a-z0-9_]+)+/[a-z][0-9a-z]?;' \
+            app/src/main/java || true)
           if [ -n "$found" ]; then
             echo "::error::R8 renames these on every X release."
-            echo "::error::Hook by resource name or a stable API instead."
+            echo "::error::Find them in Targets.kt, by resource name, or through a stable API instead."
             echo "$found"
             exit 1
           fi
