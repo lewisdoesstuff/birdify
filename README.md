@@ -16,6 +16,7 @@ Restores the classic Twitter branding in the X app (Android).
 | Wording           | Post / Repost | Tweet / Retweet   |
 | Grok tab          | in the nav    | removed           |
 | Grok post button  | on each post  | removed           |
+| Timeline ads      | promoted      | removed           |
 
 ## Requirements
 
@@ -43,8 +44,8 @@ Birdify is two components bundled into one module:
 - **Xposed module** — a LSPosed module installed as a system app. It resolves X's
   icon resources by name and substitutes the bundled bird, serves an animated
   bird for the header logo, rewrites Post/Repost → Tweet/Retweet in the app's own
-  strings, switches the dark theme to dim, and removes the Grok tab and post
-  button.
+  strings, switches the dark theme to dim, removes the Grok tab and post button,
+  and drops ads from timelines.
 
 ## Dark mode
 
@@ -191,6 +192,29 @@ printing `showAskGrokButton=` must be the field `GrokButton.kt` names.
 
 To find the field again, search a decompile for `"showAskGrokButton="`.
 
+## Removing ads
+
+X stores timeline entries locally and builds each displayed item from its row
+through one function. That function already returns nothing for rows it cannot
+show. Every ad carries promoted metadata (`TimelinePromotedMetadata`), whether
+it is a promoted post, a promoted account or an image ad. `TimelineAds.kt`
+returns nothing for any item that has some, so ads are removed before they are
+laid out and leave no gap.
+
+R8 renames both the function and the metadata class. On the device, the
+metadata's own `toString` confirms the class before anything is dropped.
+`resync.sh` checks the function's signature, and checks that
+`TimelinePromotedMetadata(` still belongs to the class `TimelineAds.kt` names.
+
+To find them again:
+
+- **Metadata class:** search a decompile for `"TimelinePromotedMetadata("`.
+- **Item builder:** find the static method that constructs `UrtTimelinePost`
+  from a database view and returns the timeline item interface.
+
+The hook logs each new kind of timeline item once, by class and model name.
+That is how to identify any other card worth removing.
+
 ## Overlays spanning renames
 
 X has renamed the resources it uses for the launcher icon and splash screen, so
@@ -231,8 +255,8 @@ by name and type signature, using `dexdump` from the SDK's build tools. Fixing a
 Two rules keep it durable: never hardcode a resource ID, and never reference an
 obfuscated class. The bird is bundled in `app/src/main/res/drawable/bird_blue.xml`
 because X no longer ships a bird vector to borrow. `DimTheme.kt`,
-`DimSurfaces.kt`, `BirdTint.kt` and `GrokButton.kt` are the documented
-exceptions, all described above. Each verifies its target at runtime, and `resync.sh` checks the members
+`DimSurfaces.kt`, `BirdTint.kt`, `GrokButton.kt` and `TimelineAds.kt` are the
+documented exceptions, all described above. Each verifies its target at runtime, and `resync.sh` checks the members
 they name.
 
 ### Known gaps
