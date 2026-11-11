@@ -66,6 +66,7 @@ class AppHook {
         BirdRefresh.hook()
         GrokTab.hook(lpparam.classLoader)
         GrokButton.hook(lpparam.classLoader)
+        TimelineAds.hook(lpparam.classLoader)
     }
 
     private fun log(message: String) = XposedBridge.log("$LOG: $message")

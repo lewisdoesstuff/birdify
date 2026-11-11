@@ -207,7 +207,26 @@ SYMBOL_CHECKS=(
     "BirdTint.kt|bird tint|Lcom/x/compose/core/j; d \(Lcom/x/icons/b;Ljava/lang/String;Landroidx/compose/ui/Modifier;JZLandroidx/compose/runtime/Composer;II\)V"
     "BirdTint.kt|bird tint|Lcom/x/icons/b; a I"
     "GrokButton.kt|grok button|Lcom/x/urt/items/post/a6; Y Z"
+    "TimelineAds.kt|timeline ads|Lorg/chromium/support_lib_boundary/util/b; W \(.*\)Lcom/x/models/timelines/items/o0;"
 )
+
+# A class known only by the name its own toString prints, as "label|class".
+OWNER_CHECKS=(
+    "TimelineAds.kt|timeline ads|TimelinePromotedMetadata(|Lcom/x/models/gf;"
+)
+
+# Prints the class whose code holds the given string constant.
+label_owner() {
+    local label=$1 dexdump dex
+    dexdump=$(dirname "$AAPT2")/dexdump
+    for dex in "$WORKDIR"/dex/classes*.dex; do
+        grep -aqF "$label" "$dex" || continue
+        "$dexdump" -d "$dex" 2>/dev/null | awk -v label="$label" '
+            /^ *#[0-9]+ *: \(in L/ { cls = $NF; sub(/^\(in /, "", cls); sub(/\)$/, "", cls) }
+            index($0, "const-string") && index($0, "\"" label) { print cls; exit }
+        '
+    done | head -1
+}
 
 # A field whose meaning only its owner's toString records, as "label|field".
 # The first boolean toString reads after printing the label must be the field,
@@ -255,6 +274,17 @@ for check in "${SYMBOL_CHECKS[@]}"; do
         printf '  ok       %-14s %s\n' "$what" "$shown"
     else
         printf '  MISSING  %-14s %s\n' "$what" "$shown"
+        printf '           <-- %s goes inert on this build\n' "$file"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+for check in "${OWNER_CHECKS[@]}"; do
+    IFS='|' read -r file what label owner <<< "$check"
+    found=$(label_owner "$label")
+    if [ "$found" = "$owner" ]; then
+        printf '  ok       %-14s %s is %s\n' "$what" "$label" "$owner"
+    else
+        printf '  MISSING  %-14s %s is %s, expected %s\n' "$what" "$label" "${found:-absent}" "$owner"
         printf '           <-- %s goes inert on this build\n' "$file"
         FAILURES=$((FAILURES + 1))
     fi
