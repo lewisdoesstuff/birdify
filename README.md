@@ -45,7 +45,9 @@ Birdify is two components bundled into one module:
   icon resources by name and substitutes the bundled bird, serves an animated
   bird for the header logo, rewrites Post/Repost → Tweet/Retweet in the app's own
   strings, switches the dark theme to dim, removes the Grok tab and post button,
-  and drops ads from timelines.
+  and drops ads from timelines. The obfuscated members those hooks need are
+  found on the device, so most X updates need no new release (see
+  [Version support](#version-support)).
 
 ## Dark mode
 
@@ -65,8 +67,9 @@ setting onto that enum, `(mode, darkVariant, systemIsDark) -> enum`. It returns
 
 `DimTheme.kt` hooks that function and turns a `LIGHTS_OUT` result into `DIM`, so
 the timeline and most of the app draw dim with X's own colours. The enum's
-constants keep their names through R8. The hook therefore checks that the class
-it found really has `DIM` and `LIGHTS_OUT` before installing.
+constants keep their names through R8, which is how the enum is found: it is
+the one enum with `STANDARD`, `DIM` and `LIGHTS_OUT`. The mapper is then the one
+method taking two values and a boolean that returns it and reads `LIGHTS_OUT`.
 
 ### 2. The bars' palette (`DimSurfaces.kt`)
 
@@ -83,9 +86,12 @@ is the only thing that reads them:
 | backgroundTertiary  | `#262626` | `#22303C`      |
 
 `DimSurfaces.kt` swaps those fields when the package loads, before the dark
-instance is built. Each field is compared with the value X ships before writing
-and read back afterwards. A renamed field is logged and left alone, so the bars
-stay lights out rather than something else being repainted.
+instance is built. The palette is found by its `toString` label,
+`XColors(backgroundPrimary=…`, and the candidates are the static colour fields
+its initialiser reads that nothing else in X reads. Each grey is picked from
+those by the value X ships, and read back after writing. A grey that is missing
+or ambiguous is logged and left alone, so that bar stays lights out rather than
+something else being repainted.
 
 Compose packs a `Color` into a ULong with the ARGB in the high word, so field
 values are `argb shl 32` rather than plain `0xAARRGGBB`.
@@ -103,30 +109,13 @@ class by field, and that approach falls apart on an update:
   the class merely existed still passed.
 
 Selecting X's own `DIM` theme avoids all of this for the main UI. The bars'
-palette is the one place a field swap is still needed, and it is only safe
-because those three fields have exactly one reader.
+palette is the one place a field swap is still needed. It is only safe because
+it is limited to fields with exactly one reader, the bars' dark palette.
 
-### Finding them again after an X update
+### Checking it on a device
 
-R8 renames both classes on most releases. `resync.sh` names the members it
-expects, so start there. If one is reported missing, find it again in a jadx
-decompile:
-
-- **Theme enum:** search for the string `"LIGHTS_OUT"`. That finds the enum
-  class, whose constants are not obfuscated.
-- **Theme mapper:** find the method that returns that enum and contains
-  `return <enum>.LIGHTS_OUT` twice, once per dark variant. Its parameters are two
-  small setting enums and a boolean. Update `THEME_MAPPER` and `THEME_ENUM` in
-  `DimTheme.kt`.
-- **Bars' palette:** search for `"XColors(backgroundPrimary="`, the data class's
-  `toString`. Its static initialiser builds the dark instance from fields on one
-  colour class. The first three arguments are the primary, secondary and
-  tertiary backgrounds. Check that each field has no other reader, then update
-  `COLOURS` and the field names in `DimSurfaces.kt`.
-- **Checks:** update the matching lines in `SYMBOL_CHECKS` in `resync.sh`.
-
-Then check on a device that the module log shows `lights out replaced with dim`
-and `dim surfaces applied 3/3`.
+The module log should show `dim theme hook installed`, `dim surfaces applied
+3/3` and, with X set to dark, `lights out replaced with dim`.
 
 ## The bird's colour
 
@@ -141,10 +130,10 @@ substitutes `LocalContentColor` and discards the value passed in, so the bit has
 to be cleared for the colour to take effect. Getting this wrong fails silently:
 the hook reports success and the bird simply renders in the theme colour.
 
-To find the composable again after a rename, take the static method that most
-X icon call sites go through. Its first parameter is the icon wrapper class
-(`com.x.icons.b`, whose int field `a` is the drawable id). Its signature is
-`(icon, contentDescription, Modifier, long tint, boolean, Composer, int, int)`.
+The composable is the one method with the signature
+`(icon, contentDescription, Modifier, long tint, boolean, Composer, int, int)`,
+where the icon wrapper is the class whose `toString` prints `Icon(drawableRes=`.
+The wrapper's drawable id is the field that label prints.
 
 ## The header bird
 
@@ -184,13 +173,13 @@ store keeps its real names through R8, so this needs no obfuscated symbol.
 post with Grok". X copies that mark onto the post's UI model (`AvailablePost`) as
 `showAskGrokButton`, and `GrokButton.kt` clears it as each model is built.
 
-The model and the field are both obfuscated. The model's `toString` would
-identify the field, but it throws at runtime, because a nested function
-reference has lost the reflection metadata it needs. So `resync.sh` pins the
-field from the bytecode instead: the first boolean that `toString` reads after
-printing `showAskGrokButton=` must be the field `GrokButton.kt` names.
-
-To find the field again, search a decompile for `"showAskGrokButton="`.
+The model and the field are both obfuscated, and the model's `toString` throws
+at runtime, because a nested function reference has lost the reflection
+metadata it needs. So the field is found from that `toString`'s bytecode
+instead. Kotlin reads each property once, in the order it prints them, so the
+field read for the `showAskGrokButton=` label is the one whose position matches
+that label's. The label and read counts have to agree, and the field has to be
+a boolean.
 
 ## Removing ads
 
@@ -201,16 +190,10 @@ it is a promoted post, a promoted account or an image ad. `TimelineAds.kt`
 returns nothing for any item that has some, so ads are removed before they are
 laid out and leave no gap.
 
-R8 renames both the function and the metadata class. On the device, the
-metadata's own `toString` confirms the class before anything is dropped.
-`resync.sh` checks the function's signature, and checks that
-`TimelinePromotedMetadata(` still belongs to the class `TimelineAds.kt` names.
-
-To find them again:
-
-- **Metadata class:** search a decompile for `"TimelinePromotedMetadata("`.
-- **Item builder:** find the static method that constructs `UrtTimelinePost`
-  from a database view and returns the timeline item interface.
+R8 renames both the function and the metadata class. The metadata class is
+the one whose `toString` prints `TimelinePromotedMetadata(`. The function is
+the one taking a stored row and two `LinkedHashMap`s that constructs
+`UrtTimelinePost`, the class printing `UrtTimelinePost(`.
 
 The hook logs each new kind of timeline item once, by class and model name.
 That is how to identify any other card worth removing.
@@ -235,29 +218,39 @@ This builds both APKs and packages `birdify-ksu.zip`.
 
 ## Version support
 
-Birdify resolves resources by **name** at runtime and never hardcodes a resource
-ID. X renumbers every resource ID on each release, and re-runs R8 with fresh
+X renumbers every resource ID on each release, and re-runs R8 with fresh
 obfuscation, so IDs and obfuscated names are both invalidated by an update.
+Birdify depends on neither:
 
-X can still break Birdify by renaming or deleting a resource we target. When that
-happens, `resync.sh` will tell you exactly what changed:
+- **Resources** are resolved by name at runtime.
+- **Obfuscated members** are found at runtime by `Targets.kt`. Each one is
+  identified by something R8 leaves alone: a `toString` label, an enum
+  constant's name, or a signature made of unobfuscated types. The sections
+  above describe each search. [DexKit](https://github.com/LuckyPray/DexKit) runs
+  them over X's dex the first time a new X build starts, which takes under a
+  second. The results are cached in X's cache directory against the APK and the
+  module, so later launches skip it.
+
+Every search must match exactly once. If X changes enough that one finds
+nothing or several candidates, the log says so (`targets found in … ms: 6/7,
+missing [...]`) and that hook stays off, while the rest keep working.
+
+`resync.sh` repeats the same searches against an APK with `dexdump`, so a
+release that breaks one can be spotted without a device:
 
 ```sh
 ./resync.sh ~/Downloads/com.twitter.android_12.41.0.apkm
 ```
 
-It reports each resource Birdify depends on, flags the ones X no longer has, and
-suggests replacements. It also checks every obfuscated member the module hooks,
-by name and type signature, using `dexdump` from the SDK's build tools. Fixing a breakage should mean editing a name in
-`app/src/main/java/ooo/lew/birdify/AppHook.kt` or renaming a file under
+It also reports each resource Birdify depends on, flags the ones X no longer
+has, and suggests replacements. Fixing a breakage should mean adjusting a
+search in `Targets.kt`, editing a name in `AppHook.kt` or renaming a file under
 `overlay/src/main/res`, never chasing a new ID.
 
-Two rules keep it durable: never hardcode a resource ID, and never reference an
-obfuscated class. The bird is bundled in `app/src/main/res/drawable/bird_blue.xml`
-because X no longer ships a bird vector to borrow. `DimTheme.kt`,
-`DimSurfaces.kt`, `BirdTint.kt`, `GrokButton.kt` and `TimelineAds.kt` are the
-documented exceptions, all described above. Each verifies its target at runtime, and `resync.sh` checks the members
-they name.
+Two rules keep it durable: never hardcode a resource ID, and never name an
+obfuscated class or member. CI rejects both. The bird is bundled in
+`app/src/main/res/drawable/bird_blue.xml` because X no longer ships a bird
+vector to borrow.
 
 ### Known gaps
 

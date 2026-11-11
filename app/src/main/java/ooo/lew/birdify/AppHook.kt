@@ -60,13 +60,14 @@ class AppHook {
             log("hooks failed: $t")
         }
 
-        DimTheme.hook(lpparam.classLoader)
-        DimSurfaces.hook(lpparam.classLoader)
-        BirdTint.hook(lpparam.classLoader)
+        Targets.resolve(lpparam)
+        DimTheme.hook()
+        DimSurfaces.hook()
+        BirdTint.hook()
         BirdRefresh.hook()
         GrokTab.hook(lpparam.classLoader)
-        GrokButton.hook(lpparam.classLoader)
-        TimelineAds.hook(lpparam.classLoader)
+        GrokButton.hook()
+        TimelineAds.hook()
     }
 
     private fun log(message: String) = XposedBridge.log("$LOG: $message")

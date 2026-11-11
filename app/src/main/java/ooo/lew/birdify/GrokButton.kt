@@ -3,7 +3,6 @@ package ooo.lew.birdify
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodHook.MethodHookParam
 import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
 import java.lang.reflect.Field
 
 /**
@@ -13,18 +12,15 @@ import java.lang.reflect.Field
  * onto the post's UI model as showAskGrokButton. Clearing it as each model is
  * built hides the button wherever posts are drawn.
  *
- * The model and the field are named here because R8 renames them. The model's
- * toString cannot be used to confirm the field at runtime, since it throws on
- * a function reference whose metadata R8 stripped, so resync.sh confirms it
- * from the bytecode instead: the boolean toString prints after its
- * showAskGrokButton label must be this field. A rename leaves the button alone
- * and logged.
+ * R8 renames the model and the field, so Targets finds the field from the
+ * bytecode of the model's toString: it is the one read for the
+ * showAskGrokButton label. The toString itself cannot be called to check
+ * this, since it throws on a function reference whose metadata R8 stripped.
+ * If the field is missing or not a boolean, the button is left alone and logged.
  */
 object GrokButton {
 
     private const val LOG = "birdify"
-    private const val POST_MODEL = "com.x.urt.items.post.a6"
-    private const val SHOW_ASK_GROK = "Y"
 
     @Volatile
     private var flag: Field? = null
@@ -32,20 +28,22 @@ object GrokButton {
     @Volatile
     private var hidden = 0
 
-    fun hook(cl: ClassLoader) {
+    fun hook() {
         try {
-            val model = XposedHelpers.findClass(POST_MODEL, cl)
-            val field = model.getDeclaredField(SHOW_ASK_GROK)
-            if (field.type != Boolean::class.javaPrimitiveType) {
-                XposedBridge.log("$LOG: $POST_MODEL.$SHOW_ASK_GROK is ${field.type}, button unchanged")
+            val field = Targets.field(Targets.ASK_GROK) ?: run {
+                XposedBridge.log("$LOG: grok button has no showAskGrokButton field, button unchanged")
                 return
             }
-            field.isAccessible = true
+            val model = field.declaringClass
+            if (field.type != Boolean::class.javaPrimitiveType) {
+                XposedBridge.log("$LOG: ${model.name}.${field.name} is ${field.type}, button unchanged")
+                return
+            }
             flag = field
             val targets = XposedBridge.hookAllConstructors(model, modelHook)
             XposedBridge.log(
-                if (targets.isNotEmpty()) "$LOG: grok button hook installed on $POST_MODEL"
-                else "$LOG: grok button found no constructor on $POST_MODEL"
+                if (targets.isNotEmpty()) "$LOG: grok button hook installed on ${model.name}"
+                else "$LOG: grok button found no constructor on ${model.name}"
             )
         } catch (t: Throwable) {
             XposedBridge.log("$LOG: grok button unavailable: $t")
