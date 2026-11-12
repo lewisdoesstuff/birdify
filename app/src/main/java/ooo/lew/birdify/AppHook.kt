@@ -68,6 +68,7 @@ class AppHook {
         Switches.hook(lpparam.classLoader)
         GrokButton.hook()
         TimelineAds.hook()
+        SwitchLog.hook(lpparam)
     }
 
     private fun log(message: String) = XposedBridge.log("$LOG: $message")
