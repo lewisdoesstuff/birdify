@@ -1,6 +1,6 @@
 id=birdify
 name=Birdify
-version=v1.2.0
-versionCode=6
+version=v1.3.0
+versionCode=7
 author=lew
-description=Restores classic Twitter branding in X: blue bird launcher/notification icon, "Twitter" name, blue splash, animated header bird, dim dark theme, and Tweet/Retweet wording. Removes the Grok tab, the Grok button on posts, and timeline ads.
+description=Restores classic Twitter branding in X: blue bird launcher/notification icon, "Twitter" name, blue splash, animated header bird, dim dark theme, and Tweet/Retweet wording. Removes Grok's entry points, ads and Premium upsells.
