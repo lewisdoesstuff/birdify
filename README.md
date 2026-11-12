@@ -188,9 +188,18 @@ exists in X. A missing key is a warning rather than a failure, since X retires
 experiments often. The module log names each switch the first time it is
 answered.
 
-To find candidates on a new X build, list the switch store's keys and values,
-or log the keys X reads along with their callers. Prefer switches that default
-to off.
+To find candidates, turn on `SwitchLog.kt` by creating its flag file, then
+restart X:
+
+```sh
+adb shell su -c 'touch /data/data/com.twitter.android/cache/birdify-switch-log'
+```
+
+While the flag exists it writes two files to that directory.
+`switches.tsv` lists each switch X reads, with its type, value, default and
+the code that read it. `switches-all.tsv` holds every key and value in the
+store. Prefer switches that default to off, so answering false matches X's own
+behaviour. Delete the flag to stop logging.
 
 ## Removing the Grok button on posts
 
