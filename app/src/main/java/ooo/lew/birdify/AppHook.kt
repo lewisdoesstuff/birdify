@@ -65,7 +65,7 @@ class AppHook {
         DimSurfaces.hook()
         BirdTint.hook()
         BirdRefresh.hook()
-        GrokTab.hook(lpparam.classLoader)
+        Switches.hook(lpparam.classLoader)
         GrokButton.hook()
         TimelineAds.hook()
     }
