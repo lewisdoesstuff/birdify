@@ -324,20 +324,28 @@ if [ -n "$post" ]; then
 fi
 
 echo
-echo "Feature switches answered (GrokTab.kt)"
-# Not obfuscated, but X can retire a switch or move the store.
-if members_matching 'Lcom/x/featureswitches/FeatureSwitchesRepositoryImpl; getBoolean \(Ljava/lang/String;Z\)Z' >/dev/null; then
-    printf '  ok       FeatureSwitchesRepositoryImpl.getBoolean\n'
-else
-    printf '  MISSING  FeatureSwitchesRepositoryImpl.getBoolean <-- GrokTab.kt goes inert\n'
-    FAILURES=$((FAILURES + 1))
-fi
-for key in android_webview_grok_tab_enabled; do
-    if grep -aqF "$key" "$WORKDIR"/dex/classes*.dex; then
+echo "Feature switches answered (Switches.kt)"
+# Not obfuscated, but X can move the store or retire a switch. A retired
+# switch is only a warning: X drops experiments often, and the feature may
+# have gone with it. A dex string is its length byte, its text and a NUL,
+# which keeps one key from matching inside a longer one. The length byte can
+# be a digit, so only letters and underscores rule a match out.
+for getter in getBoolean peekBoolean; do
+    if members_matching "Lcom/x/featureswitches/FeatureSwitchesRepositoryImpl; $getter \\(Ljava/lang/String;Z\\)Z" >/dev/null; then
+        printf '  ok       FeatureSwitchesRepositoryImpl.%s\n' "$getter"
+    else
+        printf '  MISSING  FeatureSwitchesRepositoryImpl.%s <-- Switches.kt goes inert\n' "$getter"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+SWITCH_KEYS=$(sed -n '/val OFF = setOf(/,/^    )/p' app/src/main/java/ooo/lew/birdify/Switches.kt |
+    grep -oE '"[a-z0-9_]+"' | tr -d '"')
+[ -n "$SWITCH_KEYS" ] || die "no switch keys found in Switches.kt"
+for key in $SWITCH_KEYS; do
+    if grep -aqP "(?<![a-z_])$key\x00" "$WORKDIR"/dex/classes*.dex; then
         printf '  ok       %s\n' "$key"
     else
-        printf '  MISSING  %s <-- X no longer reads it, so the tab has moved\n' "$key"
-        FAILURES=$((FAILURES + 1))
+        printf '  gone     %s <-- X no longer reads it; drop it or find its replacement\n' "$key"
     fi
 done
 
