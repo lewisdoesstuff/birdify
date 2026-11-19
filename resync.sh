@@ -249,30 +249,29 @@ label_owner() {
     done | head -1
 }
 
-# Prints the field a data class's toString reads for one label. Kotlin reads
-# each property once, in the order it prints them, so the n-th label belongs
-# to the n-th field read, as Targets.labelledField assumes.
-labelled_field() {
-    local prefix=$1 name=$2 owner
-    owner=$(label_owner "$prefix")
+# Checks a field Targets.printedField will look for on the device. R8 moves
+# runs of a toString's appends into helpers that reorder labels and values, so
+# the bytecode cannot say which field a label prints; the device finds out by
+# printing. This checks what that needs: the label in the owner's toString and
+# at least one field of the type to try. Prints "owner label:type (n to try)".
+printed_field() {
+    local owner=$1 label=$2 type=$3 n
     [ -n "$owner" ] || return 0
-    method_code "$owner" toString '()Ljava/lang/String;' | awk -v own="$owner." -v name="$name" '
-        /const-string/ {
-            s = $0; sub(/^[^"]*"/, "", s); sub(/" \/\/ string@[0-9a-f]+$/, "", s)
-            if (s !~ /=$/) next
-            sub(/=$/, "", s); n = split(s, parts, ", "); s = parts[n]; sub(/^.*\(/, "", s)
-            labels[++nl] = s; next
-        }
-        /iget/ && index($0, own) { f = $0; sub(/.*, /, "", f); sub(/ .*/, "", f); reads[++nr] = f }
-        END { if (nl != nr) exit; for (i = 1; i <= nl; i++) if (labels[i] == name) print reads[i] }
-    '
+    # Not grep -q: quitting early would fail the pipe under pipefail.
+    method_code "$owner" toString '()Ljava/lang/String;' |
+        grep -E "const-string.*\"([^\"]*\(|, )$label=\"" >/dev/null || return 0
+    n=$(awk -v c="$owner" -v t="$type" '$1 == c && $3 == t' "$WORKDIR/members.txt" | sort -u | wc -l)
+    [ "$n" -gt 0 ] && echo "$owner $label:$type ($n to try)"
 }
 
 # Keeps the "Lclass; name type" lines on stdin whose code contains the text.
 code_contains() {
     local text=$1 cls name type
     while read -r cls name type; do
-        method_code "$cls" "$name" "$type" | grep -qF "$text" && echo "$cls $name $type"
+        # Not grep -q: quitting early would fail the pipe under pipefail.
+        if method_code "$cls" "$name" "$type" | grep -F "$text" >/dev/null; then
+            echo "$cls $name $type"
+        fi
     done
 }
 
@@ -309,10 +308,12 @@ icon=$(label_owner "Icon(drawableRes=")
 target "bird tint" "icon wrapper" "$icon"
 if [ -n "$icon" ]; then
     target "bird tint" "icon composable" "$(members_matching "[^ ]+ [^ ]+ \($(regex "$icon")Ljava/lang/String;Landroidx/compose/ui/Modifier;JZLandroidx/compose/runtime/Composer;II\)V")"
-    target "bird tint" "drawableRes" "$(labelled_field "Icon(drawableRes=" drawableRes | grep ':I$')"
+    target "bird tint" "drawableRes" "$(printed_field "$icon" drawableRes I)"
 fi
 
-target "grok button" "showAskGrokButton" "$(labelled_field "AvailablePost(" showAskGrokButton | grep ':Z$')"
+post=$(label_owner "AvailablePost(")
+target "grok button" "AvailablePost" "$post"
+[ -n "$post" ] && target "grok button" "showAskGrokButton" "$(printed_field "$post" showAskGrokButton Z)"
 
 target "timeline ads" "TimelinePromotedMetadata" "$(label_owner "TimelinePromotedMetadata(")"
 post=$(label_owner "UrtTimelinePost(")

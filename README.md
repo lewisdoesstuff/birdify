@@ -135,7 +135,8 @@ the hook reports success and the bird simply renders in the theme colour.
 The composable is the one method with the signature
 `(icon, contentDescription, Modifier, long tint, boolean, Composer, int, int)`,
 where the icon wrapper is the class whose `toString` prints `Icon(drawableRes=`.
-The wrapper's drawable id is the field that label prints.
+The wrapper's drawable id is the field that label prints, found by printing
+(see [Fields found by printing](#fields-found-by-printing)).
 
 ## The header bird
 
@@ -208,13 +209,25 @@ copies that mark onto the post's UI model (`AvailablePost`) as
 `showAskGrokButton`, and `GrokButton.kt` clears it as each model is built. No
 switch controls it.
 
-The model and the field are both obfuscated, and the model's `toString` throws
-at runtime, because a nested function reference has lost the reflection
-metadata it needs. So the field is found from that `toString`'s bytecode
-instead. Kotlin reads each property once, in the order it prints them, so the
-field read for the `showAskGrokButton=` label is the one whose position matches
-that label's. The label and read counts have to agree, and the field has to be
-a boolean.
+The model and the field are both obfuscated. The model is the class whose
+`toString` prints `AvailablePost(`, and the field is the boolean it prints
+after `showAskGrokButton=`, found by printing.
+
+### Fields found by printing
+
+A Kotlin data class prints each property after its label, so a label names its
+field. The bytecode no longer shows which is which, though: R8 moves runs of a
+`toString`'s appends into shared helpers that take labels and values in
+whatever order suits the helper. From X 12.44.0, pairing the n-th label with the
+n-th field read gave `showAskGrokButton` a `List`.
+
+`Targets.printedField` asks the `toString` instead. It allocates a blank
+instance without running a constructor, sets one candidate field at a time, and
+picks the field whose value appears after the label. The other fields stay
+null, which avoids X's real instances throwing from `toString` on a function
+reference that has lost its reflection metadata. This runs the first time each
+hook fires, once X is up, because printing initialises the classes `toString`
+uses.
 
 ## Removing ads
 
@@ -232,6 +245,16 @@ the one taking a stored row and two `LinkedHashMap`s that constructs
 
 The hook logs each new kind of timeline item once, by class and model name.
 That is how to identify any other card worth removing.
+
+## The launch reveal
+
+From X 12.44.0, X takes over the end of the system splash screen and draws its
+own X logo, which zooms open to reveal the app. It covers the overlay's bird
+after a moment. Two switches enable it, `app_launch_animated_launch_screen_enabled`
+and `..._all_devices_enabled`, and `Switches.kt` answers both false. X copies
+them into its preferences for the next cold start, so the reveal stops from the
+second launch after the module takes effect, and the plain splash with the bird
+fades out as before.
 
 ## Overlays spanning renames
 
@@ -267,11 +290,13 @@ Birdify depends on neither:
   module, so later launches skip it.
 
 Every search must match exactly once. If X changes enough that one finds
-nothing or several candidates, the log says so (`targets found in … ms: 6/7,
+nothing or several candidates, the log says so (`targets found in … ms: 5/6,
 missing [...]`) and that hook stays off, while the rest keep working.
 
 `resync.sh` repeats the same searches against an APK with `dexdump`, so a
-release that breaks one can be spotted without a device:
+release that breaks one can be spotted without a device. A field found by
+printing cannot be picked without running X, so for those it checks that the
+label and at least one field of the right type exist:
 
 ```sh
 ./resync.sh ~/Downloads/com.twitter.android_12.41.0.apkm
@@ -300,7 +325,7 @@ vector to borrow.
 - The post detail screen still has a Grok button in its top bar, and the side
   menu still has "Get Grok". X draws both unconditionally, with no flag or
   switch to clear.
-- Tested against X 12.41.0.
+- Tested against X 12.44.0.
 
 While I'll try and stay on top of updates, please open an issue if I haven't updated yet.
 

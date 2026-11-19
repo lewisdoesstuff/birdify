@@ -58,6 +58,13 @@ object Switches {
         "subscriptions_upsells_articles_post_composer_promo_variant_enabled",
         "x_lite_quick_promote_enabled",
         "x_lite_quick_promote_nux_enabled",
+
+        // The launch reveal: X draws its own X logo over the splash screen and
+        // zooms it open, covering the overlay's bird. X copies these into its
+        // preferences for the next cold start, so the reveal stops from the
+        // second launch after this takes effect.
+        "app_launch_animated_launch_screen_enabled",
+        "app_launch_animated_launch_screen_all_devices_enabled",
     )
 
     private val answered = ConcurrentHashMap.newKeySet<String>()
