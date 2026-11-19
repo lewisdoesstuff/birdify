@@ -27,6 +27,9 @@ import java.util.Properties
  * Every search must match exactly once. Anything else is logged and that
  * target is left unresolved, so its hook stays off rather than landing on the
  * wrong member.
+ *
+ * A data class field is found by its toString label, but not from the dex:
+ * see [printedField].
  */
 object Targets {
 
@@ -43,11 +46,8 @@ object Targets {
     /** The composable most X icons are drawn through. */
     const val ICON_COMPOSABLE = "iconComposable"
 
-    /** The icon wrapper's drawable resource id. */
-    const val ICON_RES = "iconRes"
-
-    /** AvailablePost's showAskGrokButton. */
-    const val ASK_GROK = "askGrok"
+    /** AvailablePost's class, whose showAskGrokButton is found by [printedField]. */
+    const val AVAILABLE_POST = "availablePost"
 
     /** The function that builds each timeline item from its stored row. */
     const val ITEM_BUILDER = "itemBuilder"
@@ -56,7 +56,7 @@ object Targets {
     const val PROMOTED = "promoted"
 
     private val KEYS = listOf(
-        THEME_MAPPER, DARK_SURFACES, ICON_COMPOSABLE, ICON_RES, ASK_GROK, ITEM_BUILDER, PROMOTED,
+        THEME_MAPPER, DARK_SURFACES, ICON_COMPOSABLE, AVAILABLE_POST, ITEM_BUILDER, PROMOTED,
     )
 
     private var found: Map<String, String> = emptyMap()
@@ -132,8 +132,7 @@ object Targets {
         put(THEME_MAPPER) { themeMapper(bridge)?.descriptor }
         put(DARK_SURFACES) { darkSurfaces(bridge)?.joinToString(",") { it.descriptor } }
         put(ICON_COMPOSABLE) { iconComposable(bridge)?.descriptor }
-        put(ICON_RES) { labelledField(bridge, "Icon(drawableRes=", "drawableRes")?.descriptor }
-        put(ASK_GROK) { labelledField(bridge, "AvailablePost(", "showAskGrokButton")?.descriptor }
+        put(AVAILABLE_POST) { toStringOf(bridge, "AvailablePost(")?.className }
         put(PROMOTED) { toStringOf(bridge, "TimelinePromotedMetadata(")?.className }
         put(ITEM_BUILDER) { itemBuilder(bridge)?.descriptor }
         return out
@@ -157,28 +156,59 @@ object Targets {
     )
 
     /**
-     * The field a data class prints after [name]. Kotlin's toString reads each
-     * property once, in the order it prints them, so the n-th label belongs to
-     * the n-th field read. The counts have to agree for that to hold.
+     * The field of [type] that [owner]'s toString prints after "[label]=".
+     *
+     * Kotlin prints each property after its label, but R8 moves runs of those
+     * appends into shared helpers that take their labels and values in
+     * whatever order suits the helper. The bytecode's order then no longer
+     * pairs a label with its field, and on X 12.44 it paired
+     * showAskGrokButton with a List. Printing does pair them, so a blank
+     * instance, allocated without running a constructor, is printed once per
+     * candidate field with only that field set, and the answer is the field
+     * whose value appears after the label. Its other fields are null and
+     * print as "null", which sidesteps the function references that make
+     * X's real instances throw from toString.
+     *
+     * This initialises the classes toString uses, so call it once X is
+     * running rather than while the package loads. Booleans and ints only.
      */
-    private fun labelledField(bridge: DexKitBridge, prefix: String, name: String): FieldData? {
-        val toString = toStringOf(bridge, prefix) ?: return null
-        val labels = toString.usingStrings
-            .filter { it.endsWith("=") }
-            .map { it.removeSuffix("=").substringAfterLast(", ").substringAfterLast('(') }
-        val reads = toString.usingFields
-            .filter { it.usingType == FieldUsingType.Read && it.field.className == toString.className }
-            .map { it.field }
-        if (labels.size != reads.size) {
-            log("$prefix toString prints ${labels.size} labels but reads ${reads.size} fields")
-            return null
+    fun printedField(owner: Class<*>, label: String, type: Class<*>): Field? = try {
+        val (set, unset) = when (type) {
+            Boolean::class.javaPrimitiveType -> true to false
+            Int::class.javaPrimitiveType -> 0x5EEDB12D to 0
+            else -> throw IllegalArgumentException("cannot probe a ${type.name}")
         }
-        val index = labels.indexOf(name)
-        if (index < 0) {
-            log("$prefix toString has no $name label")
-            return null
+        val printed = Regex("""(\(|, )${Regex.escape(label)}=$set(,|\))""")
+        val blank = allocate(owner)
+        if (printed.containsMatchIn(blank.toString())) {
+            log("${owner.name} prints $label=$set while blank")
+            null
+        } else {
+            single(
+                "$label printed by ${owner.name}",
+                owner.declaredFields
+                    .filter { it.type == type && !Modifier.isStatic(it.modifiers) }
+                    .filter { field ->
+                        field.isAccessible = true
+                        field.set(blank, set)
+                        try {
+                            printed.containsMatchIn(blank.toString())
+                        } finally {
+                            field.set(blank, unset)
+                        }
+                    },
+            )
         }
-        return reads[index]
+    } catch (t: Throwable) {
+        log("$label field unresolvable on ${owner.name}: $t")
+        null
+    }
+
+    /** An instance of [cls] with every field zero or null and no constructor run. */
+    private fun allocate(cls: Class<*>): Any {
+        val unsafe = Class.forName("sun.misc.Unsafe")
+        val instance = unsafe.getDeclaredField("theUnsafe").apply { isAccessible = true }.get(null)
+        return unsafe.getMethod("allocateInstance", Class::class.java).invoke(instance, cls)!!
     }
 
     /**

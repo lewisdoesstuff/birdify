@@ -13,9 +13,10 @@ import java.lang.reflect.Field
  * white in dark mode. Passing a different colour to that composable is the only
  * way past it.
  *
- * Targets finds the composable and the icon wrapper's resource field, since R8
- * renames both. If either is missing the bird stays tinted by the theme and
- * the log says so, rather than this changing the app's icons.
+ * Targets finds the composable, since R8 renames it, and the icon wrapper's
+ * resource field the first time an icon is drawn (see Targets.printedField).
+ * If either is missing the bird stays tinted by the theme and the log says
+ * so, rather than this changing the app's icons.
  */
 object BirdTint {
 
@@ -36,21 +37,26 @@ object BirdTint {
     /** Compose packs a Color into a ULong with the ARGB in the high word. */
     private val TWITTER_BLUE = 0xFF1D9BF0L shl 32
 
-    @Volatile
-    private var resField: Field? = null
+    private var resField: Lazy<Field?> = lazyOf(null)
 
     @Volatile
     private var tinted = 0
 
     fun hook() {
         try {
-            val composable = Targets.method(Targets.ICON_COMPOSABLE)
-            val res = Targets.field(Targets.ICON_RES)
-            if (composable == null || res == null || res.type != Int::class.javaPrimitiveType) {
+            val composable = Targets.method(Targets.ICON_COMPOSABLE) ?: run {
                 XposedBridge.log("$LOG: bird tint has no icon composable, bird unchanged")
                 return
             }
-            resField = res
+            val icon = composable.parameterTypes[ICON_ARG]
+            resField = lazy {
+                Targets.printedField(icon, "drawableRes", Int::class.javaPrimitiveType!!).also {
+                    XposedBridge.log(
+                        if (it != null) "$LOG: bird tint reads ${icon.name}.${it.name}"
+                        else "$LOG: bird tint has no drawableRes field, bird unchanged"
+                    )
+                }
+            }
             XposedBridge.hookMethod(composable, tintHook)
             XposedBridge.log("$LOG: bird tint hook installed on ${composable.declaringClass.name}.${composable.name}")
         } catch (t: Throwable) {
@@ -60,8 +66,8 @@ object BirdTint {
 
     private val tintHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            val res = resField ?: return
             if (param.args.size < ARGS) return
+            val res = resField.value ?: return
             val icons = XIcons.ids()
             if (icons.isEmpty()) return
             val resId = try {
